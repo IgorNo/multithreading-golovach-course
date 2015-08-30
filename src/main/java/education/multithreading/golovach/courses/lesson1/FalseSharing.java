@@ -1,110 +1,72 @@
 package education.multithreading.golovach.courses.lesson1;
 
-import java.util.concurrent.*;
-import java.util.logging.Logger;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 
+import static java.util.concurrent.Executors.newFixedThreadPool;
+
+/**
+ * Created by yaroslav on 30.08.15.
+ */
 public class FalseSharing {
-    private static final Logger logger = Logger.getLogger(FalseSharing.class.getName());
+    /**
+     * Long is 8 bytes. Typical cache line is 64 bytes. =>
+     * If for first thread take value0 and for second thread value1 (or 2,3... which are probably
+     * will be in the same cache line) then will observe False Sharing effect.
+     * If take value0 and value8 => they for sure will be in different cache lines  => performance
+     * much better then in first case (no false sharing effect)
+     * In i5 processor I observe 7-10 times better performance without false sharing.
+     */
+    volatile static long value0 = 0;
+    volatile static long value1 = 0;
+    volatile static long value2 = 0;
+    volatile static long value3 = 0;
+    volatile static long value4 = 0;
+    volatile static long value5 = 0;
+    volatile static long value6 = 0;
+    volatile static long value7 = 0;
+    volatile static long value8 = 0;
 
-    private volatile long v0 = 1;
-    private volatile long v1 = 1;
-    private volatile long v2 = 1;
-    private volatile long v3 = 1;
-    private volatile long v4 = 1;
-    private volatile long v5 = 1;
-    private volatile long v6 = 1;
-    private volatile long v7 = 1;
-    private volatile long v8 = 1;
 
-    private volatile CountDownLatch start;
-    private volatile CountDownLatch stop;
-    private volatile ExecutorService threadPool;
-
-    private Callable<Long> do_v0 = () -> {
-        v0 = 1;
-        start.countDown();
-        start.await();
-
-        long time = System.currentTimeMillis();
-        for (int i=0; i<100000000; i++)
-            v0 *= v0 + 1;
-        time = System.currentTimeMillis() - time;
-
-        stop.countDown();
-        return time;
-    };
-
-    private Callable<Long> do_v1 = () -> {
-        v1 = 1;
-        start.countDown();
-        start.await();
-
-        long time = System.currentTimeMillis();
-        for (int i=0; i<100000000; i++)
-            v1 *= v1 + 1;
-        time = System.currentTimeMillis() - time;
-
-        stop.countDown();
-        return time;
-    };
-
-    private Callable<Long> do_v8 = () -> {
-        v8 = 1;
-        start.countDown();
-        start.await();
-
-        long time = System.currentTimeMillis();
-        for (int i=0; i<100000000; i++)
-            v8 *= v8 + 1;
-        time = System.currentTimeMillis() - time;
-
-        stop.countDown();
-        return time;
-    };
-
-    private long interceptor(Callable<Long> t1, Callable<Long> t2) {
-        start = new CountDownLatch(2);
-        stop = new CountDownLatch(2);
-        threadPool = Executors.newFixedThreadPool(2);
-
-        Future<Long> f1 = threadPool.submit(t1);
-        Future<Long> f2 = threadPool.submit(t2);
-
-        try {
-            stop.await();
-            return (f1.get() + f2.get()) / 2;
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new IllegalStateException(e);
-        } finally {
-            threadPool.shutdown();
-        }
-    }
-
-    public long do_v0_v1() {
-        return interceptor(do_v0, do_v1);
-    }
-
-    public long do_v0_v8() {
-        return interceptor(do_v0, do_v8);
-    }
-
-    public long sum() {
-        // avoid optimisation
-        return v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8;
-    }
-
-    public static void main(String[] args) {
-        FalseSharing falseSharing = new FalseSharing();
-
-        for(int i=0; i<5; i++) {
-            System.out.println("#" + i + " run");
-
-            System.out.println("\tv0 and v1: " + falseSharing.do_v0_v1() + " ms");
-            System.out.println("\tv0 and v8: " + falseSharing.do_v0_v8() + " ms");
-        }
-
-        // avoid optimisation
-        logger.finest("sum = " + falseSharing.sum());
+    public static void main(String[] args) throws Exception {
+        ExecutorService pool = newFixedThreadPool(2);
+        CountDownLatch latch1 = new CountDownLatch(2);
+        CountDownLatch latch2 = new CountDownLatch(2);
+        pool.submit(new Callable<Void>() {
+            @Override
+            public Void call() throws Exception {
+                latch1.countDown();
+                latch1.await();
+                long t0 = System.nanoTime();
+                for (int k = 0; k < 100_000_000; k++) {
+                    value0 = value0 * k;
+                }
+                long t1 = System.nanoTime();
+                System.out.println((t1-t0)/1000000 + "ms");
+                latch2.countDown();
+                return null;
+            }
+        });
+        pool.submit(new Callable<Void>() {
+            @Override
+            public Void call() throws Exception {
+                latch1.countDown();
+                latch1.await();
+                long t0 = System.nanoTime();
+                for (int k = 0; k < 100_000_000; k++) {
+                    /**
+                     * change here (value1 or value8)
+                     */
+                    value1 = value1 * k;
+                }
+                long t1 = System.nanoTime();
+                System.out.println((t1 - t0) / 1000000 + "ms");
+                latch2.countDown();
+                return null;
+            }
+        });
+        latch2.await();
+        pool.shutdownNow();
     }
 }
